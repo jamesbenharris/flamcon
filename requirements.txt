@@ -1,0 +1,12 @@
+vit-pytorch 
+scipy 
+boto3 
+av
+trl 
+transformers>=4.28.1
+datasets
+einops
+einops_exts
+wandb
+deepspeed
+labml-nn
