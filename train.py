@@ -360,7 +360,7 @@ def main():
         
     optim = optimizer(
         (p for _, p in paramsToOptimize),
-        lr=1e-5,
+        lr=1e-4,
         weight_decay=0,
     )
     
@@ -381,8 +381,8 @@ def main():
     #For quick validation use generated data.
     #data = RandomVideos(length=args.batch,frames=args.max_frames)
 
-    trainData = WebVidDataset("train_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=100) #500 videos
-    testData = WebVidDataset("test_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=20,test=True)# 50 videos
+    trainData = WebVidDataset("train_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=100) #100 videos
+    testData = WebVidDataset("test_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=20,test=True) #20 videos
 
     sampler1 = DistributedSampler(trainData, rank=args.rank, num_replicas=args.world_size, shuffle=True)
     sampler2 = DistributedSampler(testData, rank=args.rank, num_replicas=args.world_size, shuffle=True)
