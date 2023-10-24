@@ -14,7 +14,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
     BackwardPrefetch,
 )
-from torch import  nn, zeros, float32, float16, cuda, set_float32_matmul_precision, load, argmax, Size, device, Tensor, BoolTensor
+from torch import  nn, zeros, float32, float16, cuda, set_float32_matmul_precision, load, argmax, Size, device, Tensor, BoolTensor,tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import StepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -80,7 +80,7 @@ def getLoss(predicted, labels, logits, tokenizer):
 #     print(tokenizer.batch_decode(sampler_nuke(predicted)),'-',tokenizer.batch_decode(labels))
     loss_fct = nn.CrossEntropyLoss()
     loss = 0
-    count = 0
+    count =0
     for i in range(len(predicted)-1):
         losses = loss_fct(
             predicted[i], labels[i]
@@ -90,8 +90,11 @@ def getLoss(predicted, labels, logits, tokenizer):
             count+=1
         else:
             print("error")
-    loss=loss/count
-    return loss
+    if count > 0:
+        loss=loss/count
+        return loss
+    else:
+        return 100.0
 
 
 def tokenize(tokenizer,text):
@@ -146,14 +149,14 @@ def train(args, model, rank, world_size, train_loader, optimizer, epoch, logits,
             text_tokens = model(input_ids, images=media, attention_mask=attention_mask)
         
         loss = getLoss(text_tokens, input_ids_test, logits, tokenizer)
-        loss.backward()
-        
-        model.clip_grad_norm_(1.0)
-        optimizer.step()
-        
-        if loss.item()> 0.0:
-            ddp_loss[0] += loss.item()
-            ddp_loss[1] += len(media)
+        if loss != 100.0:
+            loss.backward()
+            model.clip_grad_norm_(1.0)
+            optimizer.step()
+            
+            if loss.item()> 0.0:
+                ddp_loss[0] += loss.item()
+                ddp_loss[1] += len(media)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     if rank == 0:
@@ -381,8 +384,8 @@ def main():
     #For quick validation use generated data.
     #data = RandomVideos(length=args.batch,frames=args.max_frames)
 
-    trainData = WebVidDataset("train_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=100) #100 videos
-    testData = WebVidDataset("test_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=20,test=True) #20 videos
+    trainData = WebVidDataset("train_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,samples=16800) #100 videos
+    testData = WebVidDataset("test_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,test=True,samples=2000) #20 videos
 
     sampler1 = DistributedSampler(trainData, rank=args.rank, num_replicas=args.world_size, shuffle=True)
     sampler2 = DistributedSampler(testData, rank=args.rank, num_replicas=args.world_size, shuffle=True)
