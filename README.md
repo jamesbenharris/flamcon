@@ -54,7 +54,7 @@ The [10 million WebVid dataset](https://github.com/m-bain/webvid) was used to ex
 To train the Flamcon model, follow these steps:
 
 1. Clone this repository: `git clone https://github.com/vrne/flamcon`
-2. To install the required dependencies, download data, start training: 
+2. To install the required dependencies, download data, and start training: 
     ```
     sh setup.sh
     ```
