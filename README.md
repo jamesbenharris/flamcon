@@ -41,8 +41,9 @@ Key features of Flamcon:
 
 The following hardware was used for testing and training the model.
 
-1.  2 A6000 GPU's 48GB memory for development/testing
+1.  2 A6000 GPU's 48GB memory for development
 2.  8 A6000 GPU's 48GB memory for training
+3.  1 A6000 GPU 48GB memory for testing
 
 ### Data
 
@@ -61,6 +62,16 @@ To train the Flamcon model, follow these steps:
    torchrun --nnodes=1 --nproc_per_node=2 train.py --batch 6 --max_frames 40
    ```
 
+
+### Testing
+
+To test the Flamcon model once trained, follow these steps:
+
+1. Run the testing script:
+   ```
+   python test.py
+   ```
+   or load demo/generate.ipynb
 ## Configuration
 
 You can adjust various parameters in the training and inference scripts to customize the behavior of the Flamcon model. Refer to the script comments and the [DeepSpeed documentation](https://www.deepspeed.ai/docs/config-json/) for more details on configuring distributed training.
@@ -77,9 +88,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 Flamcon is developed by:
 
-[Ben Harris*](https://jamesbenjaminharris.com).
-
-The team is primarily from VRNE.co.
+[Ben Harris](https://jamesbenjaminharris.com)
 
 ## Acknowledgments
 This code is based on Lucidrains' [flamingo implementation](https://github.com/lucidrains/flamingo-pytorch) and [OpenFlamingo](https://github.com/mlfoundations/open_flamingo).  I appreciate your assistance in expediting the process by improving my understanding of fsdp wrapping and checkpointing techniques!

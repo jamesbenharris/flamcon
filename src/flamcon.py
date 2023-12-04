@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import nn
 from src.flamingo import GatedCrossAttentionBlock, PerceiverResampler
-from src.misc import build_alibi_tensor
+from src.misc import genTokenize
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from labml_nn.sampling.nucleus import NucleusSampler
@@ -221,34 +221,33 @@ class Flamcon(nn.Module):
         
     ): 
         return self.forward(text,images=images,videos=videos,embeds=embeds,gen=gen,attention_mask=attention_mask)
+    
     def generate(
         self,
         text,
         tokenizer,
         to_logits,
+        rank,
         *,
         images=None,
         videos=None,
         embeds=None,
         gen=True,
         attention_mask=None,
-        n_tokens = 100,
-        n_samples = 1
-        
+        n_tokens = 5,        
     ):
+        
         sampler = NucleusSampler(0.95, TemperatureSampler(1.))
-        data = torch.tile(text[None, :], (n_samples, 1))
-        logs = [[(text, Text.meta)] for _ in range(n_samples)]
-        seq_len = len(text)
+        space = torch.Tensor([204]).to(rank).int()
         for i in range(n_tokens):
-            data = data[-seq_len:][0]
-            print(data.shape)
-            data = self.forward(data,images=images,videos=videos,embeds=embeds,gen=gen,attention_mask=attention_mask)
-            # logits = to_logits(output[0])
-            # logits = logits[:, -1]
-            # res = sampler(logits)
-            # #print(data.shape,logits.shape)
-            # data = torch.cat([data, logits.reshape(1,logits.shape[0])], dim=0)
-            # for j in range(n_samples):
-            #     logs[j] += [('' + tokenizer.decode(res.item()), Text.value)]
-        return data
+            data, attention_mask = genTokenize(text,tokenizer,rank)
+            seq_len = len(data)
+            data = data[-seq_len:]
+            output = self.forward(data,images=images,videos=videos,embeds=embeds,gen=gen,attention_mask=attention_mask)
+            logits = to_logits(output)
+            logits = logits[:, -1]
+            res = sampler(logits)
+            data = torch.cat([data, space.reshape(space.shape[0],1)], dim=1)
+            data = torch.cat([data, res.reshape(res.shape[0],1)], dim=1)
+            text = tokenizer.decode(data[0]).replace('  ',' ')
+        return text

@@ -228,7 +228,7 @@ def main():
     parser.add_argument("--max_frames", default=10, type=int)
     parser.add_argument("--max_tokens", default=512, type=int)
     parser.add_argument("--lang_model", default="tiiuae/falcon-7b", type=str)
-    parser.add_argument("--run_name", default="flamcon", type=str)
+    parser.add_argument("--run_name", default="run_1", type=str)
     parser.add_argument("--my_group", default=None, type=str)
     parser.add_argument("--delete_previous_checkpoint", default=True, type=bool)
     parser.add_argument("--resume", default=True, type=bool)

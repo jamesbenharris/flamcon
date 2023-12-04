@@ -145,3 +145,28 @@ def _prepare_attn_mask(
             expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask | combined_attention_mask
         )
         return combined_attention_mask
+
+def tokenize(tokenizer,text):
+    tokenizer.padding_side = "right"
+    text =  tokenizer(
+        text,
+        max_length=512,
+        padding="longest",
+        truncation="only_first",
+        return_tensors="pt",
+    )   
+    return  text['input_ids'], text['attention_mask'].bool()
+
+def genTokenize(
+    text,
+    tokenizer,
+    rank,
+):
+    input_ids, attention_mask = tokenize(tokenizer,text)
+    input_ids = input_ids.to(rank)
+    batch_size, seq_length = input_ids.shape 
+    attention_mask = _prepare_attn_mask(attention_mask,
+                                                     input_shape=(batch_size, seq_length),
+                                                     past_key_values_length=0)
+    attention_mask = attention_mask.to(rank)
+    return input_ids, attention_mask

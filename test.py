@@ -3,23 +3,17 @@ import argparse
 import glob
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
-    CPUOffload,
     MixedPrecision,
-    ShardingStrategy,
-    BackwardPrefetch,
 )
 from torch import  nn, zeros, float32, float16, cuda, set_float32_matmul_precision, load, argmax, save
 from torch.utils.data.distributed import DistributedSampler
-from torch.optim.lr_scheduler import StepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import RandomSampler,DataLoader
+from torch.utils.data import DataLoader
 
 from tqdm import tqdm
 from src.flamcon import Flamcon, LayerNorm
 from src.distributed import init_distributed_device, world_info_from_env
-from src.misc import save_checkpoint
 from src.dataloader import WebVidDataset, RandomVideos
 
 
@@ -31,66 +25,8 @@ from transformers import (
     AutoTokenizer
 )
 
-from einops import rearrange
-from deepspeed.ops.adam import FusedAdam
-from deepspeed.ops.adam import DeepSpeedCPUAdam
-
-
 set_float32_matmul_precision('medium')
 
-def tokenize(tokenizer,text):
-    tokenizer.padding_side = "right"
-    text =  tokenizer(
-        text,
-        max_length=512,
-        padding="longest",
-        truncation="only_first",
-        return_tensors="pt",
-    )   
-    return  text['input_ids'], text['attention_mask'].bool()
-
-def getLoss(predicted, actual, logits):
-    """
-    Compute cross-entropy loss between predicted and actual tokens.
-
-    Args:
-        predicted (Tensor): Predicted tokens.
-        actual (Tensor): Actual tokens.
-        logits (Callable): Function to compute logits.
-
-    Returns:
-        loss (Tensor): Cross-entropy loss.
-    """
-    predicted = logits(predicted)
-    predicted = rearrange(predicted, 'b n c -> b c n')
-    actual = actual[:, 0:]
-    loss = F.cross_entropy(predicted, actual, ignore_index=0)
-    return loss
-    
-def test(args, model, rank, dialogue, media, attention_mask, tokenizer, to_logits):
-    """
-    Perform the training loop for one epoch.
-
-    Args:
-        args: Parsed command-line arguments.
-        model: The Flamcon model.
-        rank (int): Process rank.
-        dialog: tokens
-        media: image/video
-
-    Returns:
-        text_tokens: the output the prediction
-    """
-    input_ids, attention_mask = tokenize(tokenizer,dialogue)
-    input_ids = input_ids.to(rank)
-    media = media.to(rank)
-    if args.video:
-        text_tokens = model.generate(input_ids, tokenizer, to_logits, videos=media)
-    else:
-        text_tokens = model.generate(input_ids, tokenizer, to_logits, images=media)
-    return text_tokens
-
-        
 def main():
     """
     Main entry point of the script.
@@ -107,7 +43,7 @@ def main():
     parser.add_argument("--epochs", default=20, type=int)
     parser.add_argument("--fsdp", default=True, type=bool)
     parser.add_argument("--video", default=True, type=bool)
-    parser.add_argument("--max_frames", default=10, type=int)
+    parser.add_argument("--max_frames", default=40, type=int)
     parser.add_argument("--max_tokens", default=512, type=int)
     parser.add_argument("--lang_model", default="tiiuae/falcon-7b", type=str)
     parser.add_argument("--run_name", default="flamcon", type=str)
@@ -117,7 +53,10 @@ def main():
     
     args = parser.parse_args()
     args.local_rank, args.rank, args.world_size = world_info_from_env()
-    device_id = init_distributed_device(args)
+    try:
+        device_id = init_distributed_device(args)
+    except:
+        device_id = 0
 
     if args.rank == 0:
         print("Loading ViT\n")
@@ -138,19 +77,20 @@ def main():
 
     if args.rank == 0:
         print("Loading Falcon\n")
-        
+    
     #Loads language model
     falcon = AutoModelForCausalLM.from_pretrained(
                 args.lang_model,
                 trust_remote_code=True
             )
+    #Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.lang_model)
     tokenizer.add_special_tokens(
         {"additional_special_tokens": ["<|endofchunk|>", "<media>"]}
     )
     tokenizer.add_special_tokens({'pad_token': '<PAD>'})
     falcon.resize_token_embeddings(new_num_tokens=len(tokenizer))
-    
+
     #set Mixes precision policy
     mp_policy = MixedPrecision(
         param_dtype=float32,
@@ -158,13 +98,12 @@ def main():
         buffer_dtype=float16,
     )
 
-    if args.rank == 0:
-        print("Loading Flamcon")
-    
     #Print parameters per GPU
     print(f"ViT parameter num: {sum(p.numel() for p in vit.parameters())} on rank {args.rank}\n")
     print(f"Language parameter num: {sum(p.numel() for p in falcon.parameters())} on rank {args.rank}\n")
+    to_logits = falcon.lm_head.to(args.rank)  
     
+    #Load Flamcon
     model = Flamcon(
                     num_tokens = len(tokenizer),       # number of tokens
                     dim = args.dim,                     # dimensions
@@ -180,8 +119,11 @@ def main():
                     lang_model = falcon                 # llm
                     )
 
+    #Clear up vit and llm memory
     del vit
-           
+    del falcon
+
+    #Load checkpoint if exists
     resume_from_epoch = 0
     checkpoint = None
     if os.path.exists(f"{args.run_name}") and args.resume:
@@ -199,29 +141,11 @@ def main():
             resume_from_epoch = checkpoint["epoch"] + 1
             if args.rank == 0:
                 model.load_state_dict(checkpoint["model_state_dict"], False)
-        
-        
-    if args.fsdp:
-        fsdp_args = dict(
-                    process_group=None,
-                    cpu_offload=CPUOffload(offload_params=args.cpu_offload),
-                    device_id=device_id,
-                    sync_module_states =True,  # broadcast loaded ckpt from rank 0 -> all ranks
-                    sharding_strategy=ShardingStrategy.FULL_SHARD,
-                    use_orig_params=False,
-                    mixed_precision=mp_policy,
-                    forward_prefetch=False,
-                    backward_prefetch=BackwardPrefetch.BACKWARD_POST,
-                    limit_all_gathers=True,
-                )        
-        model.get_fsdp(fsdp_args)
-    else:
-        model = model.to(device_id)
-        model = DDP(model, device_ids=[device_id])
-    #Load to_logits for loss
-    
-    to_logits = falcon.lm_head.to(args.rank)  
-    del falcon
+
+    print("Loading model to GPU rank")
+    model = model.to(args.rank)
+
+    print('Model Loaded')
     print(f"Model parameter num: {sum(p.numel() for p in model.parameters())} on rank {args.rank}\n")
     print(f"Model {cuda.memory_allocated()/1024**3:.3} GB on rank {args.rank}\n")
     
@@ -230,16 +154,12 @@ def main():
     if args.rank == 0:
         print("Loading Data with batch: "+str(args.batch)+"\n")
     
-    #For quick validation use generated data.
-    #data = RandomVideos(length=args.batch,frames=args.max_frames)
+    #Load data, dataSampler, dataloader
+    data = WebVidDataset("test_nw.csv","data",args.max_frames,tokenizer,args.max_tokens,test=True,samples=500)
+    dataSampler = DistributedSampler(data, rank=args.rank, num_replicas=args.world_size, shuffle=True)
+    dataloader = DataLoader(data,batch_size=1,sampler=dataSampler)
 
-    data = WebVidDataset("test.csv","data",args.max_frames,tokenizer,args.max_tokens,test=True)
-    sampler = RandomSampler(data)
-    dataloader = DataLoader(data,
-                                        batch_size=args.batch,
-                                        sampler=sampler)
-
-    #Start training
+    #Start testing.
     if args.rank == 0:
         print("Starting Testing\n")
         
@@ -247,13 +167,11 @@ def main():
         del checkpoint
         
     for batchid, data in enumerate(tqdm(dataloader,position=0, desc="Iters", leave=False, colour='green', ncols=80)):
-        media, dialog, dialogue_test, file, = data
-        dialog,attention_mask  = tokenize(tokenizer,dialog)
-        text = test(args, model, args.rank, dialogue_test, media, attention_mask, tokenizer, to_logits)
-        print(file[0],text)
+        media, X, y, file, = data
+        media = media.to('cuda')
+        text = model.generate(X,tokenizer,to_logits,args.rank, videos=media, n_tokens=5)
+        print(file,X,text)
         print('\n')
-        if batchid > 3:
-            break
         
 if __name__ == "__main__":
     main()
