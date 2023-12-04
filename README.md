@@ -76,6 +76,9 @@ You can adjust various parameters in the training and inference scripts to custo
 
 This project is licensed under the [MIT License](LICENSE).
 
+## Completed
+- [x] Trained model on 1000 videos
+
 ## Future plans
 - [ ] Train model on 10 million videos
 - [ ] Train model on a custom dataset
