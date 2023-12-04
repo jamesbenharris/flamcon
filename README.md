@@ -10,10 +10,12 @@ Flamcon is a flexible and powerful deep learning architecture that enables effic
 - [Requirements](#Requirements)
 - [Usage](#Usage)
   - [Training](#Training)
+  - [Testing](#Testing)
 - [Configuration](#configuration)
 - [License](#license)
 - [Team](#Team)
-- [Future plans](#Futureplans)
+- [Completed](#Completed)
+- [Future plans](#Future)
 - [Acknowledgments](#Acknowledgments)
 - [Citations](#Citations)
 
@@ -80,7 +82,7 @@ This project is licensed under the [MIT License](LICENSE).
 - [x] Train model on 1000 videos(More training needed)
 - [x] Test generator
 
-## Future plans
+## Future
 - [ ] Train model on 10 million videos
 - [ ] Train model on a custom dataset
 
