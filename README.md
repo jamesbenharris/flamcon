@@ -54,13 +54,10 @@ The [10 million WebVid dataset](https://github.com/m-bain/webvid) was used to ex
 To train the Flamcon model, follow these steps:
 
 1. Clone this repository: `git clone https://github.com/vrne/flamcon`
-2. Install the required dependencies: `pip install -r requirements.txt`
-3. Prepare your training data and adjust the data paths in the code.
-    a.  See src/dataloader.py for examples.
-4. Run the training script:
-   ```
-   torchrun --nnodes=1 --nproc_per_node=2 train.py --batch 6 --max_frames 40
-   ```
+2. To install the required dependencies, download data, start training: 
+    ```
+    sh setup.sh
+    ```
 
 
 ### Testing
@@ -71,7 +68,6 @@ To test the Flamcon model once trained, follow these steps:
    ```
    python test.py
    ```
-   or load demo/generate.ipynb
 ## Configuration
 
 You can adjust various parameters in the training and inference scripts to customize the behavior of the Flamcon model. Refer to the script comments and the [DeepSpeed documentation](https://www.deepspeed.ai/docs/config-json/) for more details on configuring distributed training.
