@@ -77,7 +77,7 @@ You can adjust various parameters in the training and inference scripts to custo
 This project is licensed under the [MIT License](LICENSE).
 
 ## Completed
-- [x] Train model on 1000 videos
+- [x] Train model on 1000 videos(More training needed)
 - [x] Test generator
 
 ## Future plans
