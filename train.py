@@ -15,6 +15,7 @@ from torch.distributed.fsdp import (
     BackwardPrefetch,
 )
 from torch import  nn, zeros, float32, float16, cuda, set_float32_matmul_precision, load, argmax, Size, device, Tensor, BoolTensor,tensor
+import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import StepLR
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -71,30 +72,30 @@ def getLoss(predicted, labels, logits, tokenizer):
     sampler_nuke = NucleusSampler(0.95, TemperatureSampler(1.))
     #predicted = rearrange(predicted, 'b n c -> b c n')
     labels[labels == tokenizer.pad_token_id] = -100
-    labels[labels == tokenizer.eos_token] = -100
+    labels[labels == tokenizer.eos_token_id] = -100
     labels[labels == tokenizer.encode("<media>")[-1]] = -100
     #labels = labels[labels != tokenizer.pad_token_id]
-    #labels = labels[labels != tokenizer.eos_token]
+    #labels = labels[labels != tokenizer.eos_token_id]
     #labels = labels[labels != tokenizer.encode("<media>")[-1]]
     predicted = logits(predicted)[:,-labels.shape[1]:,:]
 #     print(tokenizer.batch_decode(sampler_nuke(predicted)),'-',tokenizer.batch_decode(labels))
-    loss_fct = nn.CrossEntropyLoss()
-    loss = 0
-    count =0
-    for i in range(len(predicted)-1):
-        losses = loss_fct(
-            predicted[i], labels[i]
-        )
-        if losses > 0.0:
-            loss+=losses
-            count+=1
-        else:
-            print("error")
-    if count > 0:
-        loss=loss/count
-        return loss
-    else:
-        return 100.0
+    loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+    
+    # Reshape for cross entropy loss: (batch_size * seq_len, vocab_size) and (batch_size * seq_len,)
+    shift_logits = predicted[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+    
+    # Flatten the tokens
+    shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+    shift_labels = shift_labels.view(-1)
+    
+    loss = loss_fct(shift_logits, shift_labels)
+    
+    # Return a reasonable loss value, avoiding the problematic 100.0 fallback
+    if torch.isnan(loss) or torch.isinf(loss):
+        return torch.tensor(0.0, device=predicted.device, requires_grad=True)
+    
+    return loss
 
 
 def tokenize(tokenizer,text):
@@ -149,9 +150,9 @@ def train(args, model, rank, world_size, train_loader, optimizer, epoch, logits,
             text_tokens = model(input_ids, images=media, attention_mask=attention_mask)
         
         loss = getLoss(text_tokens, input_ids_test, logits, tokenizer)
-        if loss != 100.0:
+        if not (torch.isnan(loss) or torch.isinf(loss)) and loss.item() > 0.0:
             loss.backward()
-            model.clip_grad_norm_(1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
             if loss.item()> 0.0:
@@ -185,26 +186,27 @@ def test(args, model, rank, world_size, test_loader, optimizer, epoch, logits, p
     if sampler:
         sampler.set_epoch(epoch)
     for batch_idx, (media, X, y, file) in enumerate(tqdm(test_loader,position=1, desc="Iters", leave=False, colour='green', ncols=40)):
-        input_ids, attention_mask = tokenize(tokenizer,X)
-        input_ids_test,_ = tokenize(tokenizer,y)
-        input_ids = input_ids.to(rank)
-        input_ids_test = input_ids_test.to(rank)
-        attention_mask = attention_mask.to(rank)
-        media = media.to(rank)
-        batch_size, seq_length = input_ids.shape
-        attention_mask = _prepare_attn_mask(attention_mask,
-                                                 input_shape=(batch_size, seq_length),
-                                                 past_key_values_length=0)
-        
-        if args.video:
-            text_tokens = model.test(input_ids, videos=media, attention_mask=attention_mask)
-        else:
-            text_tokens = model.test(input_ids, images=media, attention_mask=attention_mask)
-        loss = getLoss(text_tokens, input_ids_test, logits, tokenizer)
-        
-        if loss.item()> 0.0:
-            ddp_loss[0] += loss.item()
-            ddp_loss[1] += len(media)
+        with torch.no_grad():
+            input_ids, attention_mask = tokenize(tokenizer,X)
+            input_ids_test,_ = tokenize(tokenizer,y)
+            input_ids = input_ids.to(rank)
+            input_ids_test = input_ids_test.to(rank)
+            attention_mask = attention_mask.to(rank)
+            media = media.to(rank)
+            batch_size, seq_length = input_ids.shape
+            attention_mask = _prepare_attn_mask(attention_mask,
+                                                     input_shape=(batch_size, seq_length),
+                                                     past_key_values_length=0)
+            
+            if args.video:
+                text_tokens = model(input_ids, videos=media, attention_mask=attention_mask)
+            else:
+                text_tokens = model(input_ids, images=media, attention_mask=attention_mask)
+            loss = getLoss(text_tokens, input_ids_test, logits, tokenizer)
+            
+            if loss.item()> 0.0:
+                ddp_loss[0] += loss.item()
+                ddp_loss[1] += len(media)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     if rank == 0:
