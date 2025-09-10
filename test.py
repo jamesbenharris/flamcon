@@ -84,7 +84,7 @@ def main():
                 trust_remote_code=True
             )
     #Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.lang_model)
+    tokenizer = AutoTokenizer.from_pretrained(args.lang_model,do_lower_case=False)
     tokenizer.add_special_tokens(
         {"additional_special_tokens": ["<|endofchunk|>", "<media>"]}
     )
