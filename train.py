@@ -75,7 +75,7 @@ def getLoss(predicted, labels, logits, tokenizer):
     labels[labels == tokenizer.eos_token_id] = -100
     labels[labels == tokenizer.encode("<media>")[-1]] = -100
     #labels = labels[labels != tokenizer.pad_token_id]
-    #labels = labels[labels != tokenizer.eos_token]
+    #labels = labels[labels != tokenizer.eos_token_id]
     #labels = labels[labels != tokenizer.encode("<media>")[-1]]
     predicted = logits(predicted)[:,-labels.shape[1]:,:]
 #     print(tokenizer.batch_decode(sampler_nuke(predicted)),'-',tokenizer.batch_decode(labels))
